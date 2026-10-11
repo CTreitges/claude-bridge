@@ -90,7 +90,7 @@ Content-Type: application/json
 | Code | Wann |
 |---|---|
 | 202 | Session läuft (`session`, `title`, `model`, `effort`, `ultracode`; `duplicate: true`, wenn die `request_id` schon da war) |
-| 400 | Transkript leer |
+| 400 | Transkript leer (`bridge: "claude-bridge"` weist den Dienst für „Verbindung prüfen“ aus) |
 | 401 | Token fehlt oder stimmt nicht, oder der Dienst hat keins (≥ 32 Zeichen) |
 | 422 | Transkript länger als 20 000 Zeichen, unbekanntes Modell oder Effort |
 | 429 | mehr als 6 Aufträge pro Minute · schon 5 Sessions offen · 10 falsche Tokens in 10 Minuten von derselben Adresse |

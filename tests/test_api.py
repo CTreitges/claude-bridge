@@ -146,6 +146,19 @@ def test_leeres_transkript_400_erst_nach_token(client, starts):
     assert client.post("/v1/task", json=auftrag(transcript="")).status_code == 401
 
 
+def test_verbindung_pruefen_wie_die_app_sie_schickt(client, starts):
+    """Genau der Koerper, den AgentBridge.check() fuer ein Claude-Widget schickt: leeres
+    Transkript, request_id "check", Optionen dabei. Richtiges Token: 400 mit Kennung,
+    falsches: 401 — die Optionen duerfen daran nichts aendern."""
+    pruefung = {"transcript": "", "request_id": "check", "recorded_at": "", "duration_ms": 0,
+                "source": "widget", "options": {"model": "fable", "effort": "max", "ultracode": True}}
+    gut = client.post("/v1/task", json=pruefung, headers=KOPF)
+    assert gut.status_code == 400
+    assert gut.json()["bridge"] == "claude-bridge"
+    assert client.post("/v1/task", json=pruefung, headers={"Authorization": "Bearer falsch"}).status_code == 401
+    assert starts == []
+
+
 def test_verbindung_pruefen_verbraucht_kein_rate_limit(client, starts):
     for _ in range(config.RATE_LIMIT_PER_MIN + 3):
         assert client.post("/v1/task", json=auftrag(transcript=""), headers=KOPF).status_code == 400

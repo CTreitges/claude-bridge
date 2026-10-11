@@ -36,6 +36,9 @@ store = IdempotencyStore(config.IDEMPOTENCY_TTL_S)
 limiter = RateLimiter(config.RATE_LIMIT_PER_MIN)
 auth_failures = FailureLimiter(config.AUTH_FAIL_LIMIT, config.AUTH_FAIL_WINDOW_S)
 
+#: Kennung in der Antwort auf "Verbindung pruefen" (leeres Transkript).
+BRIDGE_ID = "claude-bridge"
+
 Model = Literal["opus", "fable", "sonnet", "haiku"]
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
@@ -113,7 +116,12 @@ def task(
     # "Verbindung pruefen" in der App schickt ein leeres Transkript: 400 heisst dort
     # "erreichbar und Token stimmt". Darum kommt diese Pruefung NACH dem Token.
     if not auftrag.transcript.strip():
-        return fehler(400, "Das Transkript ist leer")
+        # "bridge" weist den Dienst aus: so erkennt "Verbindung pruefen" in der App, wenn ein
+        # Claude-Widget versehentlich auf eine andere Bridge (etwa hermes-bridge) zeigt.
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "detail": "Das Transkript ist leer", "bridge": BRIDGE_ID},
+        )
     if not limiter.allow():
         return fehler(429, "Zu viele Auftraege — kurz warten")
 
