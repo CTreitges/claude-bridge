@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: tmux fuer die Integrationstests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux
+      - name: Abhaengigkeiten
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+      - name: pytest
+        run: .venv/bin/python -m pytest tests -q
