@@ -1,0 +1,24 @@
+[Unit]
+# Vorlage: /home/chris durch das eigene Home ersetzen — install.sh erledigt das.
+Description=claude-bridge — Sprachauftraege von WhisperLoom starten Claude-Code-Sessions (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/chris/claude-bridge
+# Fuehrendes "-": der Dienst startet auch ohne .env. Er ist dann fail-closed —
+# ohne BRIDGE_TOKEN beantwortet er jeden Auftrag mit 401, /health meldet
+# "configured": false.
+EnvironmentFile=-/home/chris/claude-bridge/.env
+# claude und tmux muessen auffindbar sein; claude liegt bei der Standardinstallation hier.
+Environment=PATH=/home/chris/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/chris/claude-bridge/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8097
+Restart=on-failure
+RestartSec=3
+# Die gestarteten Claude-Sessions leben im tmux-Server. Hat die Bridge ihn selbst gestartet,
+# steckt er in ihrer cgroup — ohne KillMode=process risse jeder Neustart der Bridge alle
+# laufenden Sessions mit. So wird nur uvicorn beendet.
+KillMode=process
+
+[Install]
+WantedBy=default.target
