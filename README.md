@@ -1,8 +1,9 @@
 # claude-bridge
 
 Startet per Sprache neue [Claude-Code](https://code.claude.com)-Sessions auf deinem eigenen
-Server. Du drückst in der Android-App [WhisperLoom](https://github.com/CTreitges/whisperloom-android)
-das Widget „Claude Code", sprichst den Auftrag und lässt los. Die Bridge startet sofort eine
+Server. Du tippst in der Android-App [WhisperLoom](https://github.com/CTreitges/whisperloom-android)
+auf das Widget „Claude Code", sprichst den Auftrag und tippst erneut (oder lässt die Sprechpause
+die Aufnahme beenden). Die Bridge startet sofort eine
 neue Session, die direkt mit dem Auftrag beginnt — und dir als Erstes eine Push-Benachrichtigung
 schickt. Weiter geht es in der Claude-App über Remote Control oder am Terminal.
 
@@ -18,7 +19,7 @@ App, dieselbe Art der Einrichtung.
 ## Was du brauchst
 
 - Einen Rechner, der dauerhaft läuft und aus dem Internet erreichbar ist (VPS, Heimserver mit
-  Portfreigabe oder Tailscale), mit **Python 3.11+** und **tmux**.
+  Portfreigabe oder Tailscale), mit **Python 3.11+** samt `python3-venv`, **tmux** und **curl**.
 - **Claude Code**, angemeldet mit einem claude.ai-Konto (Remote Control braucht das), unter
   `~/.local/bin/claude`. Einmal von Hand im Arbeitsverzeichnis (Standard: Home) gestartet, damit
   der Vertrauens-Dialog erledigt ist.
@@ -95,7 +96,9 @@ Content-Type: application/json
 | 429 | mehr als 6 Aufträge pro Minute · schon 5 Sessions offen · 10 falsche Tokens in 10 Minuten von derselben Adresse |
 | 503 | Session ließ sich nicht starten — die `request_id` wird wieder freigegeben |
 
-`GET /health` verrät nichts Geheimes: `{"status": "ok", "configured": true}`.
+`GET /health` verrät nichts Geheimes: `{"status": "ok", "configured": true}`. Ohne Token in
+`.env` (oder mit einem kürzer als 32 Zeichen) meldet er `"configured": false` und beantwortet
+jeden Auftrag mit 401.
 
 Die `request_id` bleibt über alle Wiederholungen der App gleich; dieselbe Id startet nur eine
 Session (eine Stunde lang gemerkt). Ein leeres Transkript beantwortet der Dienst mit 400,
@@ -110,8 +113,9 @@ git clone https://github.com/CTreitges/claude-bridge.git ~/claude-bridge
 
 `install.sh` legt die venv an, erzeugt eine `.env` mit neuem Token (chmod 600, das Token wird
 nicht ausgegeben), installiert die systemd-User-Unit auf Port 8097 (`PORT=… ./install.sh` für
-einen anderen) und startet sie. Mehrfach ausführbar — eine vorhandene `.env` bleibt, wie sie ist.
-Damit der Dienst ohne Anmeldung läuft: `loginctl enable-linger $USER`.
+einen anderen) und startet sie. Es schaltet Linger ein, damit der Dienst ohne Anmeldung läuft,
+und bricht mit dem Journal ab, wenn der Dienst nicht antwortet. Mehrfach ausführbar — eine
+vorhandene `.env` bleibt, wie sie ist. Installiert wird aus `requirements.lock` (exakte Versionen).
 
 Das Token für die App zeigst du **im eigenen Terminal** an (nicht in einer Claude-Session):
 
@@ -127,20 +131,33 @@ Caddy (kümmert sich selbst um das Zertifikat):
 claude-bridge.example.de {
 	encode zstd gzip
 	header X-Robots-Tag "noindex, nofollow, noarchive"
+	request_body {
+		max_size 256KB
+	}
 	reverse_proxy 127.0.0.1:8097
 }
 ```
+
+`max_size` begrenzt, was ein Fremder ohne Token schicken kann: FastAPI liest den Body, bevor es
+das Token prüft. 256 KB fassen auch 20 000 Zeichen Emoji.
 
 Die Sperre nach falschen Tokens gilt je Absender und liest dafür den letzten Eintrag von
 `X-Forwarded-For` — den setzt Caddy selbst. Ein anderer Proxy muss das genauso tun.
 
 ### In der App eintragen
 
-WhisperLoom → Einstellungen → **Erweiterte Optionen** → Widgets → neues Widget **Claude Code**:
-Server-Adresse (`https://claude-bridge.example.de`, ohne Pfad), Token, **Verbindung prüfen**.
-Modell, Effort und Ultracode stellst du im selben Profil ein. Mehrere Profile = mehrere Widgets,
-etwa „Claude" (Opus, xhigh) und „Claude Ultracode" (Opus, max, Ultracode an). Dann das Widget
-auf den Startbildschirm legen.
+WhisperLoom → Einstellungen → **Erweitert** → **Pro Widgets** einschalten → **Pro Widgets
+verwalten** → **Neues Pro Widget** → **Claude-Code-Widget**: Server-Adresse
+(`https://claude-bridge.example.de`, ohne Pfad), Token, **Verbindung prüfen**. Modell, Effort und
+Ultracode stellst du im selben Profil ein. Mehrere Profile = mehrere Widgets, etwa „Claude"
+(Opus, Extra hoch) und „Claude Ultracode" (Opus, Max, Ultracode an).
+
+Dann auf dem Startbildschirm lange drücken → Widgets → WhisperLoom → **Pro Widget** hinziehen und
+das Claude-Profil wählen. Bedienung: tippen, sprechen, tippen — ein Startbildschirm-Widget sieht
+kein Loslassen des Fingers.
+
+Das Widget gibt es ab dem nächsten F-Droid-Update von WhisperLoom; bis dahin im Test-APK der
+GitHub-Releases (`v3.9.0-claude.*`).
 
 ## Konfiguration
 
@@ -167,7 +184,16 @@ tmux kill-session -t cb-1a2b     # beenden
 claude --resume <session-id>     # eine geschlossene Session wieder aufnehmen
 ```
 
-Geschlossen wird nur, was mit `cb-` beginnt — deine eigenen tmux-Sitzungen fasst die Bridge nie an.
+Geschlossen wird nur, was `cb-<uuid>` heißt — deine eigenen tmux-Sitzungen fasst die Bridge nie
+an, und eine Session, die gerade arbeitet, auch nicht. Der Name bleibt auch nach `/clear` in
+der Session gleich; die Bridge folgt dann der neuen Session-Id.
+
+Bridge-Sessions tragen `CLAUDE_BRIDGE_SESSION=1` in ihrer Umgebung — praktisch für eigene
+Skripte, die Claude-Prozesse zählen und die Bridge-Sessions dabei auslassen wollen.
+
+**Datenschutz am Server:** Das Transkript steht während der Session in der Kommandozeile des
+claude-Prozesses. Ist `/proc` ohne `hidepid` gemountet (Ubuntu-Standard), können andere lokale
+Benutzer es mit `ps` lesen. Auf einem Ein-Personen-Server ist das meist egal.
 
 ## Wenn etwas nicht klappt
 
@@ -182,8 +208,11 @@ INFO claude-bridge: Auftrag abc-123 → cb-5f0c… (opus, xhigh, Ultracode aus, 
 
 - **„Verbindung prüfen" meldet 401** — Token in `.env` und App stimmen nicht überein (oder es
   ist kürzer als 32 Zeichen). Nach jeder Änderung an `.env` den Dienst neu starten.
-- **503 „hat sich sofort wieder beendet"** — den Aufruf von Hand nachstellen:
-  `claude --model 'opus[1m]' --effort xhigh --remote-control Test -- "Hallo"`.
+- **503 „hat sich sofort wieder beendet"** — steht dahinter ein Grund (etwa
+  `FileNotFoundError`), kam `claude` gar nicht erst in Gang: `CLAUDE_BIN` und `CLAUDE_WORKDIR`
+  prüfen. Ohne Grund ist Claude selbst sofort ausgestiegen; dann den Aufruf so nachstellen, wie
+  die Bridge ihn macht:
+  `cd ${CLAUDE_WORKDIR:-~} && CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK=1 ~/.local/bin/claude --model 'opus[1m]' --effort xhigh --remote-control Test -- "Hallo"`.
   Meist fehlt die Anmeldung oder das Arbeitsverzeichnis ist nicht vertraut.
 - **Session startet, aber kein Push** — in der Session nachsehen, was `PushNotification`
   meldete: „Remote Control inactive" heißt, Remote Control kam nicht hoch; „disabled in /config"

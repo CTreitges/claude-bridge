@@ -146,6 +146,12 @@ def task(
         store.release(auftrag.request_id)
         log.warning("Auftrag %s nicht gestartet: %s", auftrag.request_id, e)
         return fehler(503, f"Claude-Session nicht gestartet: {e}")
+    except Exception:
+        # Rueckfallnetz: ohne Freigabe bekaeme der App-Retry "duplicate", und das Diktat
+        # waere still verloren.
+        store.release(auftrag.request_id)
+        log.exception("Auftrag %s: unerwarteter Fehler beim Start", auftrag.request_id)
+        return fehler(503, "Claude-Session nicht gestartet: unerwarteter Fehler (siehe Journal)")
 
     log.info(
         "Auftrag %s → %s (%s, %s, Ultracode %s, %d Zeichen)",

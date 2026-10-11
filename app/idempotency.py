@@ -71,12 +71,19 @@ class RateLimiter:
 
 class FailureLimiter:
     """Zaehlt Fehlversuche je Absender: nach [limit] Fehlern in [window_s] Sekunden ist er
-    gesperrt, bis die aeltesten Fehler aus dem Fenster fallen."""
+    gesperrt, bis die aeltesten Fehler aus dem Fenster fallen.
+
+    Die Tabelle ist begrenzt: wer mit wechselnden Absendern flutet (lokal laesst sich
+    X-Forwarded-For setzen), soll weder Speicher noch Rechenzeit unbegrenzt binden.
+    """
+
+    MAX_KEYS = 10_000
 
     def __init__(self, limit: int, window_s: float) -> None:
         self._limit = limit
         self._window_s = window_s
         self._fails: dict[str, list[float]] = {}
+        self._swept = 0.0
         self._lock = threading.Lock()
 
     def blocked(self, key: str, now: float | None = None) -> bool:
@@ -87,10 +94,14 @@ class FailureLimiter:
     def fail(self, key: str, now: float | None = None) -> None:
         stamp = time.monotonic() if now is None else now
         with self._lock:
+            if stamp - self._swept >= 60.0:
+                # Alte Absender vergessen — hoechstens einmal pro Minute, nicht bei jedem Fehler.
+                for other in [k for k, v in self._fails.items() if stamp - v[-1] >= self._window_s]:
+                    del self._fails[other]
+                self._swept = stamp
+            if key not in self._fails and len(self._fails) >= self.MAX_KEYS:
+                self._fails.clear()
             self._fails[key] = self._recent(key, stamp) + [stamp]
-            # Alte Absender vergessen, damit die Tabelle nicht mitwaechst.
-            for other in [k for k, v in self._fails.items() if not v or stamp - v[-1] >= self._window_s]:
-                del self._fails[other]
 
     def _recent(self, key: str, now: float) -> list[float]:
         return [t for t in self._fails.get(key, []) if now - t < self._window_s]

@@ -1,18 +1,20 @@
 [Unit]
-# Vorlage: /home/chris durch das eigene Home ersetzen — install.sh erledigt das.
+# Vorlage: install.sh ersetzt @DIR@ (Repo), @HOME@ und @PORT@.
 Description=claude-bridge — Sprachauftraege von WhisperLoom starten Claude-Code-Sessions (FastAPI/uvicorn)
 After=network.target
 
 [Service]
-Type=simple
-WorkingDirectory=/home/chris/claude-bridge
+# exec statt simple: scheitert der Start (Verzeichnis, Binary), meldet systemctl das sofort.
+Type=exec
+WorkingDirectory=@DIR@
 # Fuehrendes "-": der Dienst startet auch ohne .env. Er ist dann fail-closed —
 # ohne BRIDGE_TOKEN beantwortet er jeden Auftrag mit 401, /health meldet
 # "configured": false.
-EnvironmentFile=-/home/chris/claude-bridge/.env
-# claude und tmux muessen auffindbar sein; claude liegt bei der Standardinstallation hier.
-Environment=PATH=/home/chris/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/chris/claude-bridge/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8097
+EnvironmentFile=-@DIR@/.env
+# Diesen PATH erben die Claude-Sessions. claude liegt bei der Standardinstallation in
+# ~/.local/bin; der Rest ist der Ubuntu-Standard. Erweitern: systemctl --user edit claude-bridge
+Environment=PATH=@HOME@/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+ExecStart=@DIR@/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port @PORT@
 Restart=on-failure
 RestartSec=3
 # Die gestarteten Claude-Sessions leben im tmux-Server. Hat die Bridge ihn selbst gestartet,

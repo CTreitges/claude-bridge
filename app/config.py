@@ -50,13 +50,22 @@ AUTH_FAIL_WINDOW_S = 600
 #: Kuerzer darf das Token nicht sein; sonst gilt der Dienst als nicht eingerichtet (401).
 MIN_TOKEN_LEN = 32
 
+#: Platzhalter, die irgendwann in einer Vorlage standen. Sie sind oeffentlich und duerfen
+#: nie als Token gelten — auch nicht, wenn jemand `cp .env.example .env` macht und vergisst,
+#: das Token einzutragen.
+PLACEHOLDER_TOKENS = frozenset({"hier-ein-langes-zufaelliges-token"})
+
 #: Hoechstlaenge eines Transkripts. Ein Diktat ist kein Buch; alles darueber ist ein Fehler.
 MAX_TRANSCRIPT_CHARS = 20_000
 
 #: Zeitlimit fuer jeden tmux-Aufruf.
 TMUX_TIMEOUT_S = 10
 
-#: So lange nach dem Start wird nachgesehen, ob Claude noch laeuft. Ein falsches Argument
+#: So lange darf der Starter in der tmux-Sitzung brauchen, bis er den Auftrag uebernommen hat
+#: (normal: rund 50 ms). Erst danach laeuft die Wartezeit unten.
+LAUNCH_TIMEOUT_S = 10.0
+
+#: So lange nach der Uebernahme wird nachgesehen, ob Claude noch laeuft. Ein falsches Argument
 #: oder ein kaputtes Binary beendet die Sitzung sofort — das soll die App erfahren.
 START_CHECK_S = 2.0
 
@@ -81,7 +90,7 @@ class Settings:
 
     @property
     def configured(self) -> bool:
-        return len(self.token) >= MIN_TOKEN_LEN
+        return len(self.token) >= MIN_TOKEN_LEN and self.token not in PLACEHOLDER_TOKENS
 
 
 def load_env(path: Path | None = None) -> None:

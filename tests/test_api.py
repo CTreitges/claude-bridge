@@ -78,6 +78,22 @@ def test_ohne_token_in_env_401(client, starts, monkeypatch):
     assert starts == []
 
 
+def test_platzhalter_aus_der_vorlage_gilt_nie_als_token(client, starts, monkeypatch):
+    """Der Platzhalter stand frueher in .env.example — er ist oeffentlich und lang genug."""
+    platzhalter = "hier-ein-langes-zufaelliges-token"
+    monkeypatch.setenv("BRIDGE_TOKEN", platzhalter)
+    antwort = client.post("/v1/task", json=auftrag(transcript=""), headers={"Authorization": f"Bearer {platzhalter}"})
+    assert antwort.status_code == 401
+    assert client.get("/health").json()["configured"] is False
+
+
+def test_vorlage_laesst_das_token_leer():
+    from pathlib import Path
+
+    vorlage = (Path(__file__).resolve().parent.parent / ".env.example").read_text()
+    assert "\nBRIDGE_TOKEN=\n" in vorlage
+
+
 def test_fehlversuche_sperren_den_absender(client, starts):
     falsch = {"Authorization": "Bearer falsch"}
     for _ in range(config.AUTH_FAIL_LIMIT):
@@ -233,6 +249,25 @@ def test_startfehler_503_und_retry_moeglich(client, monkeypatch):
     assert "duplicate" not in zweite.json()
 
 
+def test_unerwarteter_fehler_gibt_503_und_gibt_die_id_frei(client, monkeypatch):
+    """Sonst kaeme 500, der App-Retry bekaeme "duplicate", und das Diktat waere still weg."""
+    versuche = []
+
+    def kaputt_einmal(settings, transcript, options):
+        versuche.append(1)
+        if len(versuche) == 1:
+            raise PermissionError(13, "Permission denied")
+        return sessions.Started("cb-9", "9", "Sprachauftrag")
+
+    monkeypatch.setattr(sessions, "start", kaputt_einmal)
+    erste = client.post("/v1/task", json=auftrag(), headers=KOPF)
+    assert erste.status_code == 503
+    assert erste.json()["status"] == "error"
+    zweite = client.post("/v1/task", json=auftrag(), headers=KOPF)
+    assert zweite.status_code == 202
+    assert "duplicate" not in zweite.json()
+
+
 def test_zu_viele_sessions_429_und_retry_moeglich(client, monkeypatch):
     def voll(settings, transcript, options):
         raise sessions.TooManySessions("Es laufen schon 5 Claude-Sessions")
@@ -264,3 +299,26 @@ def test_health_verraet_nichts(client):
 def test_keine_api_doku_oeffentlich(client):
     for pfad in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(pfad).status_code == 404
+
+
+# --- Fehlversuchs-Tabelle --------------------------------------------------------
+
+def test_fehlversuchs_tabelle_bleibt_begrenzt():
+    from app.idempotency import FailureLimiter
+
+    sperre = FailureLimiter(limit=3, window_s=600)
+    for i in range(FailureLimiter.MAX_KEYS + 50):
+        sperre.fail(f"10.0.{i // 256}.{i % 256}", now=1000.0)
+    assert len(sperre._fails) <= FailureLimiter.MAX_KEYS
+
+
+def test_alte_fehlversuche_verfallen():
+    from app.idempotency import FailureLimiter
+
+    sperre = FailureLimiter(limit=2, window_s=60)
+    sperre.fail("a", now=0.0)
+    sperre.fail("a", now=1.0)
+    assert sperre.blocked("a", now=2.0)
+    assert not sperre.blocked("a", now=62.0)
+    sperre.fail("b", now=200.0)  # raeumt "a" weg
+    assert "a" not in sperre._fails

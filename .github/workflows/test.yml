@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: tmux fuer die Integrationstests
-        run: sudo apt-get install -y tmux
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux
       - name: Abhaengigkeiten
         run: |
           python -m venv .venv
